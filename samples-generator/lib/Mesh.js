@@ -154,7 +154,7 @@ Mesh.prototype.transferMaterialToVertexColors = function() {
 };
 
 /**
- * Batch multiple meshes into a single mesh. Assumes the input meshes do not already have batch ids.
+ * Batch multiple meshes into a single mesh. Mesh should have batchId attribute, or else it would be given the batchId 0.
  *
  * @param {Mesh[]} meshes The meshes that will be batched together.
  * @returns {Mesh} The batched mesh.
@@ -171,47 +171,50 @@ Mesh.batch = function(meshes) {
     var indexOffset = 0;
     var views = [];
     var currentView;
-    var meshesLength = meshes.length;
-    for (var i = 0; i < meshesLength; ++i) {
-        var mesh = meshes[i];
-        var positions = mesh.positions;
-        var normals = mesh.normals;
-        var uvs = mesh.uvs;
-        var vertexColors = mesh.vertexColors;
-        var vertexCount = mesh.getVertexCount();
+    var objectsLength = meshes.length; //added
+    console.log('objectsLength = ' + objectsLength);
+    for (var k = 0; k < objectsLength; ++k) {
+        var meshesLength = meshes[k].length;
+        for (var i = 0; i < meshesLength; ++i) {
+            var mesh = meshes[k][i];
+            var positions = mesh.positions;
+            var normals = mesh.normals;
+            var uvs = mesh.uvs;
+            var vertexColors = mesh.vertexColors;
+            var vertexCount = mesh.getVertexCount();
 
-        // Generate batch ids for this mesh
-        var batchIds = new Array(vertexCount).fill(i);
+            //get batch id from mesh
+            var batchIds = mesh.batchIds;
 
-        batchedPositions = batchedPositions.concat(positions);
-        batchedNormals = batchedNormals.concat(normals);
-        batchedUvs = batchedUvs.concat(uvs);
-        batchedVertexColors = batchedVertexColors.concat(vertexColors);
-        batchedBatchIds = batchedBatchIds.concat(batchIds);
+            batchedPositions = batchedPositions.concat(positions);
+            batchedNormals = batchedNormals.concat(normals);
+            batchedUvs = defined(uvs) ? batchedUvs.concat(uvs) : batchedUvs;
+            if(defined(vertexColors)) {batchedVertexColors = batchedVertexColors.concat(vertexColors);}
+            batchedBatchIds = batchedBatchIds.concat(batchIds);
 
-        // Generate indices and mesh views
-        var indices = mesh.indices;
-        var indicesLength = indices.length;
+            // Generate indices and mesh views
+            var indices = mesh.indices;
+            var indicesLength = indices.length;
 
-        if (!defined(currentView) || (currentView.material !== mesh.material)) {
-            currentView = new MeshView({
-                material : mesh.material,
-                indexOffset : indexOffset,
-                indexCount : indicesLength
-            });
-            views.push(currentView);
-        } else {
-            currentView.indexCount += indicesLength;
+            if (!defined(currentView) || (currentView.material !== mesh.material)) {
+                currentView = new MeshView({
+                    material: mesh.material,
+                    indexOffset: indexOffset,
+                    indexCount: indicesLength
+                });
+                views.push(currentView);
+            } else {
+                currentView.indexCount += indicesLength;
+            }
+
+            for (var j = 0; j < indicesLength; ++j) {
+                var index = indices[j] + startIndex;
+                batchedIndices.push(index);
+            }
+            startIndex += vertexCount;
+            indexOffset += indicesLength;
         }
-
-        for (var j = 0; j < indicesLength; ++j) {
-            var index = indices[j] + startIndex;
-            batchedIndices.push(index);
-        }
-        startIndex += vertexCount;
-        indexOffset += indicesLength;
     }
-
     return new Mesh({
         indices : batchedIndices,
         positions : batchedPositions,
@@ -294,26 +297,32 @@ function getAccessor(gltf, accessor) {
 }
 
 /**
- * Creates a mesh from a glTF. This utility is designed only for simple glTFs like those in the data folder.
- *
+ * Creates a mesh from a glTF. This utility is extended to support multi-mesh object with materials in the following ways:
+ *   1. mesh_index, primitive_index are added index parameter to account for all the meshes in the gltf
+ *   2. batchId is added to the mesh, so different meshes are not mixed in the mesh-batching process
+ *   3. transform is added to transform each mesh respectively, suiting to the case where coordinates of each object are given instead of only one set of coordinates for the whole set of objects is given.
+ *   4. extend Material.fromGltf() method to read materials, textures, images, samplers corresponding to the mesh from gltf, and save them all explicityly(not indices) in the mesh
  * @param {Object} gltf The glTF.
  * @returns {Mesh} The mesh.
  */
-Mesh.fromGltf = function(gltf) {
-    var gltfPrimitive = gltf.meshes[0].primitives[0];
-    var gltfMaterial = gltf.materials[gltfPrimitive.material];
-    var material = Material.fromGltf(gltfMaterial);
+
+Mesh.fromGltf = function (gltf, mesh_index, primitive_index, batchId, transform) {
+    var gltfPrimitive = gltf.meshes[Object.keys(gltf.meshes)[mesh_index]].primitives[primitive_index];
+    var material = Material.fromGltf(gltf, gltfPrimitive.material); //read material from gltf directly, which suits to the case where gltf already has its texture, 2019/12/13
     var indices = getAccessor(gltf, gltf.accessors[gltfPrimitive.indices]);
     var positions = getAccessor(gltf, gltf.accessors[gltfPrimitive.attributes.POSITION]);
     var normals = getAccessor(gltf, gltf.accessors[gltfPrimitive.attributes.NORMAL]);
-    var uvs = new Array(positions.length / 3 * 2).fill(0);
-    var vertexColors = new Array(positions.length / 3 * 4).fill(0);
-    return new Mesh({
+    var uvs = defined(gltfPrimitive.attributes.TEXCOORD_0) ? getAccessor(gltf, gltf.accessors[gltfPrimitive.attributes.TEXCOORD_0]) : new Array(positions.length / 3 * 2).fill(0);
+    //add batchIds here, 2019/12/12
+    var batchIds = new Array(positions.length / 3).fill(batchId);
+    var mesh = new Mesh({
         indices : indices,
         positions : positions,
         normals : normals,
         uvs : uvs,
-        vertexColors : vertexColors,
-        material : material
+        material : material,
+        batchIds: batchIds
     });
+    mesh.transform(transform);
+    return mesh;
 };

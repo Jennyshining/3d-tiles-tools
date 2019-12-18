@@ -28,8 +28,10 @@ var sizeOfFloat32 = 4;
  *
  * @returns {Promise} A promise that resolves with the binary glTF buffer.
  */
+//support the batch of materials, textures, images, samplers from different gltf files
+//TODO: convert the images into buffer, add them into the bufferView and accessors accordingly
 function createGltf(options) {
-    var useBatchIds = defaultValue(options.useBatchIds, true);
+    var useBatchIds = defaultValue(options.useBatchIds, false);
     var relativeToCenter = defaultValue(options.relativeToCenter, false);
     var deprecated = defaultValue(options.deprecated, false);
 
@@ -43,7 +45,7 @@ function createGltf(options) {
     var views = mesh.views;
 
     // If all the vertex colors are 0 then the mesh does not have vertex colors
-    var useVertexColors = !vertexColors.every(function(element) {return element === 0;});
+    var useVertexColors = vertexColors.length ? true : false;//!vertexColors.every(function(element) {return element === 0;});
 
     if (relativeToCenter) {
         mesh.setPositionsRelativeToCenter();
@@ -58,15 +60,15 @@ function createGltf(options) {
     var view;
     var material;
     var viewsLength = views.length;
-    var useUvs = false;
-    for (i = 0; i < viewsLength; ++i) {
-        view = views[i];
-        material = view.material;
-        if (typeof material.baseColor === 'string') {
-            useUvs = true;
-            break;
-        }
-    }
+    var useUvs = true; //no need for the loop, useUvs should set to be true to preserve the model texture
+    // for (i = 0; i < viewsLength; ++i) {
+    //     view = views[i];
+    //     material = view.material;
+    //     if (defined(material.pbrMetallicRoughness.baseColorTexture)) {
+    //         useUvs = true;
+    //         break;
+    //     }
+    // }
 
     var positionsMinMax = getMinMax(positions, 3);
     var positionsLength = positions.length;
@@ -134,9 +136,9 @@ function createGltf(options) {
     var materials = [];
     var primitives = [];
 
-    var images;
-    var samplers;
-    var textures;
+    var images = [];
+    var samplers = [];
+    var textures = [];
 
     var bufferViewIndex = 0;
     var positionsBufferViewIndex = bufferViewIndex++;
@@ -176,64 +178,15 @@ function createGltf(options) {
             min : indicesMinMax.min,
             max : indicesMinMax.max
         });
-
-        var baseColor = material.baseColor;
-        var baseColorFactor = baseColor;
-        var baseColorTexture;
-        var transparent = false;
-
-        if (typeof baseColor === 'string') {
-            if (!defined(images)) {
-                images = [];
-                textures = [];
-                samplers = [{
-                    magFilter : 9729, // LINEAR
-                    minFilter : 9729, // LINEAR
-                    wrapS : 10497, // REPEAT
-                    wrapT : 10497 // REPEAT
-                }];
-            }
-            baseColorFactor = [1.0, 1.0, 1.0, 1.0];
-            baseColorTexture = baseColor;
-            images.push({
-                uri : baseColor
-            });
-            textures.push({
-                sampler : 0,
-                source : images.length - 1
-            });
-        } else {
-            transparent = baseColor[3] < 1.0;
-        }
-
-        var doubleSided = transparent;
-        var alphaMode = transparent ? 'BLEND' : 'OPAQUE';
-
-        material = {
-            pbrMetallicRoughness : {
-                baseColorFactor : baseColorFactor,
-                roughnessFactor : 1.0,
-                metallicFactor : 0.0
-            },
-            alphaMode : alphaMode,
-            doubleSided : doubleSided
-        };
-
-        if (defined(baseColorTexture)) {
-            material.pbrMetallicRoughness.baseColorTexture = {
-                index : 0
-            };
-        }
-
-        materials.push(material);
+        var baseColorTexture = material.pbrMetallicRoughness.baseColorTexture;
 
         var attributes = {
             POSITION : positionsBufferViewIndex,
             NORMAL : normalsBufferViewIndex
         };
 
-        if (useUvs) {
-            attributes.TEXCOORD_0 = uvsBufferViewIndex;
+        if (useUvs && defined(material.pbrMetallicRoughness.baseColorTexture)) {
+            attributes.TEXCOORD_0 = uvsBufferViewIndex; //relate the TEXCOORD_0 attribute with the texture information, 2019/12/16
         }
 
         if (useVertexColors) {
@@ -243,6 +196,22 @@ function createGltf(options) {
         if (useBatchIds) {
             attributes[batchIdSemantic] = batchIdsBufferViewIndex;
         }
+
+        //if material is based on texture, arrays of images, samplers, textures should be filled here. Besides, replace the texture in the material with index
+        if(defined(baseColorTexture)){
+            images.push(material.pbrMetallicRoughness.baseColorTexture.source);
+            //Taking only one sampler is enought for most cases.
+            if(!samplers.length) {samplers.push(material.pbrMetallicRoughness.baseColorTexture.sampler);}
+            textures.push({
+                sampler : 0, //only one sampler is enough for simple cases
+                source : images.length - 1
+            });
+            material.pbrMetallicRoughness.baseColorTexture = {
+                index: textures.length - 1,
+                texCoord: 0,
+            };
+        }
+        materials.push(material);
 
         primitives.push({
             attributes : attributes,
@@ -278,7 +247,7 @@ function createGltf(options) {
             bufferView : uvsBufferViewIndex,
             byteOffset : 0,
             componentType : 5126, // FLOAT
-            count : vertexCount,
+            count : vertexCount, //uvs.length / 2
             type : 'VEC2',
             min : uvsMinMax.min,
             max : uvsMinMax.max
@@ -395,7 +364,9 @@ function createGltf(options) {
     };
 
     var gltfOptions = {
-        resourceDirectory : rootDirectory
+        resourceDirectory : rootDirectory,
+        stats: true, //for debugging purpose
+        separate: false
     };
     return gltfToGlb(gltf, gltfOptions)
         .then(function(results) {

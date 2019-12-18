@@ -10,7 +10,8 @@ module.exports = {
     metersToLatitude : metersToLatitude,
     wgs84Transform : wgs84Transform,
     lowercase : lowercase,
-    typeToNumberOfComponents : typeToNumberOfComponents
+    typeToNumberOfComponents : typeToNumberOfComponents,
+    degreeToRadian: degreeToRadian
 };
 
 function metersToLongitude(meters, latitude) {
@@ -46,4 +47,8 @@ function typeToNumberOfComponents(type) {
         case 'MAT4':
             return 16;
     }
+}
+
+function degreeToRadian(degree){
+    return degree * Math.PI / 180;
 }

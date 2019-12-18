@@ -29,7 +29,8 @@
     "fs-extra": "^4.0.2",
     "gltf-pipeline": "^2.0.0",
     "mime": "^2.0.3",
-    "simplex-noise": "^2.3.0"
+    "simplex-noise": "^2.3.0",
+    "xmlreader": "0.2.3"
   },
   "devDependencies": {
     "cloc": "^2.3.3",
