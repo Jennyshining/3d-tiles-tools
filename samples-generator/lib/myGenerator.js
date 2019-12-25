@@ -49,48 +49,12 @@ async function createBatchTableHierarchy(options) {
     // var noParents = defaultValue(options.noParents, false);
     // var multipleParents = defaultValue(options.multipleParents, false);
     var transform = defaultValue(options.transform, Matrix4.IDENTITY);
-
-    var instances = createInstances();
-    var batchTableJson = createBatchTableJson(instances,options);
-
-    var batchTableBinary;
-    if (useBatchTableBinary) {
-        batchTableBinary = createBatchTableBinary(batchTableJson, options);  // Modifies the json in place
-    }
-
-    // Mesh urls listed in the same order as features in the classIds arrays
-    var gltfs = await loadDataFromXml('./samples-generator/data/MyTestModel','config.xml');
-    /*
-    var urls = [];
-    var modelRootPath = './samples-generator/data/MyTestModel/';
-    var subDirectories = fs.readdirSync(modelRootPath);
-    var gltfNames = [];
-    var patternFileExtension = /\.gltf$/i;
-
-    //TODO: getDataFromXml
-    //loop the subDirectory to add gltf files into urls
-    for (var i = 0; i < subDirectories.length; i++) {
-        var subDirectory = path.join(modelRootPath, subDirectories[i]);
-        var stat = fs.statSync(subDirectory); //to decide whether it is directory
-        if (stat && stat.isDirectory()) {
-            var files = fs.readdirSync(subDirectory);
-            //only one gltf is added per subDirectory
-            for (var j = 0; j < files.length; j++){
-                if (patternFileExtension.test(files[j])) {
-                    gltfNames.push(files[j].split('.')[0]);
-                    urls.push(subDirectory + '\\' + files[j]);
-                }
-            }
-        }
-    }
-    //TODO: getDataFromXml
-    // Local transforms of the buildings within the tile
-    // BEAR IN MIND: should keep the same sequence with the urls
-    var buildingTransforms = [
-        wgs84Transform(util.degreeToRadian(4.4889609), util.degreeToRadian(51.9072021), 0.0),
-        wgs84Transform(util.degreeToRadian(4.4944118), util.degreeToRadian(51.9068529), 0.0),
-    ];
-    */
+    // load the attributes initially, which is used in the batchTable later for query
+    var instances = await loadInstancesFromJson('./samples-generator/data/MyTestModel/building.json');
+    var batchTableJson, batchTableBinary; //created here while the values are given later, after positions from gltf are added to instances
+   
+    // load all the gltfs from xml initially
+    var gltfs = await loadDataFromXml('./samples-generator/data/MyTestModel','config.xml');   
     var contentUri = 'tile.b3dm';
     var directory = options.directory;
     var tilePath = path.join(directory, contentUri);
@@ -99,7 +63,7 @@ async function createBatchTableHierarchy(options) {
     var batchLength = buildingsLength;
     var geometricError = 100.0;
 
-    var region = [4.45, 51.88, 4.50, 51.93]
+    var region = [4.483704078318497, 51.903386681476974, 4.498417471322507, 51.90904403212821]
         .map(function(num){ return util.degreeToRadian(num);});
     region = region.concat([0,100]); //[minHeight, maxHeight]
 
@@ -123,12 +87,20 @@ async function createBatchTableHierarchy(options) {
     return Promise.map(gltfs, function(gltfSetting) {
         return fsExtra.readJson(gltfSetting.url)
             .then(function (gltf) {
-                var meshes = [], batchId = gltfSetting.id;
+                var meshes = [], batchId = getIndexFromInstances(gltfSetting.name, instances)
                 for (var mesh_index = 0; mesh_index < gltf.meshes.length; mesh_index++) {   //added to account for multiple meshes
                     for (var primitive_index = 0; primitive_index < gltf.meshes[Object.keys(gltf.meshes)[mesh_index]].primitives.length;primitive_index++){ //added to account for multiple primitives
                         var buildingTransform = wgs84Transform(util.degreeToRadian(gltfSetting.location[0]), util.degreeToRadian(gltfSetting.location[1]), gltfSetting.location[2]);
+                        //add the position information into instances, so that they can be located accurately in cesiumjs app
+                        instances[batchId].properties.position = gltfSetting.location;
+                        instances[batchId].properties.orientation = gltfSetting.orientation;
                         meshes.push(Mesh.fromGltf(gltf, mesh_index, primitive_index, batchId, buildingTransform));
                     }
+                }
+                //give values to batchTableJson
+                batchTableJson = createBatchTableJson(instances,options);
+                if (useBatchTableBinary) {
+                    batchTableBinary = createBatchTableBinary(batchTableJson, options);  // Modifies the json in place
                 }
                 return meshes;
             });
@@ -378,42 +350,39 @@ function createHierarchy(instances) {
     };
 }
 
-function createInstances(){
-    var building0 = {
-        instance : {
-            className : 'Building',
-            properties : {
-                building_name : 'building0',
+/**
+ * read instances from citygml, which are the attributes for corresponding gltf files
+ *
+ * @param {string} citygml full path to the citygml file, which is used in 3d citydb importer/exported to generate gltfs
+ * @returns {Array[object]} instances
+ */
+function loadInstancesFromJson(jsonFile) {
+    var buildings = [];
+    try {
+        var data = fs.readFileSync(jsonFile);
+        var citygmlObjects = JSON.parse(data);
+        citygmlObjects.forEach(function(citygmlObject, i){
+            let building = {};
+            building.instance = {
+                className: 'Building',
+                properties: {
+                    building_name: 'building' + i,
+                }
+            };
+            building.properties = {
+                name: citygmlObject.gml_id,
+                terrainHeight: citygmlObject.TerrainHeight,
+                status: citygmlObject.status,
             }
-        },
-        properties : {
-            name: '{D25C4B18-E703-458E-8789-212E33DA60AC}',
-            terrainHeight: 1.1,
-            status: 1,
-            height : 5.0,
-            area : 10.0
-        }
-    };
-
-    var building1 = {
-        instance : {
-            className : 'Building',
-            properties : {
-                building_name : 'building1',
-            }
-        },
-        properties : {
-            name: '{533046F0-C276-4850-80EF-D951262963DD}',
-            terrainHeight: 3.04,
-            status: 1,
-            height : 5.0,
-            area : 10.0
-        }
-    };
-    return [building0, building1];
+            buildings.push(building);
+        });
+    } catch (error) {
+        console.error(error);
+    }
+    return buildings;
 }
 
-function getIndexFromInstances(instances, gltfName){
+function getIndexFromInstances(gltfName, instances){
     for(var i=0; i<instances.length; i++){
         if(instances[i].properties.name === gltfName){
             return i;
@@ -426,7 +395,7 @@ function getIndexFromInstances(instances, gltfName){
 /**
  * read gltfs from xml file
  * @param {string} filePath
- * @returns {Array{object}} gltfs [{name, id, url, location, orientation.heading}]
+ * @returns {Array[object]} gltfs [{name, id, url, location, orientation.heading}]
  */
 function loadDataFromXml(filePath, fileName) {
     var gltfs = [];
@@ -439,7 +408,6 @@ function loadDataFromXml(filePath, fileName) {
             res.kml.Document.Placemark.each(function (i, place) {
                 let gltf = {};
                 gltf.name = place.name.text();
-                gltf.id = i; //i is saved as gltf id, later used as batchId
                 gltf.location = [parseFloat(place.Model.Location.longitude.text()), parseFloat(place.Model.Location.latitude.text()), parseFloat(place.Model.Location.altitude.text())];
                 gltf.orientation = { heading: parseFloat(place.Model.Orientation.heading.text()) }
                 var gltfPath = place.Model.Link.href.text().split('.dae')[0] + '.gltf';
@@ -448,7 +416,7 @@ function loadDataFromXml(filePath, fileName) {
             });
         });
     } catch (error) {
-    console.error(error);
-}
-return gltfs;
+        console.error(error);
+    }
+    return gltfs;
 }

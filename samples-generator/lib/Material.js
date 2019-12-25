@@ -42,7 +42,7 @@ Material.getValue = function (material) {
 };
 
 /**
- * Creates a Material from a glTF material. This utility is extended to support meterial.
+ * Creates a Material from a glTF material. This utility is extended to support pbr material.
  *
  * @param {Object} material The glTF material.
  * @returns {Material} The material.
