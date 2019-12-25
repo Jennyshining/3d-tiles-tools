@@ -83,7 +83,7 @@ async function createBatchTableHierarchy(options) {
         BATCH_LENGTH : batchLength
     };
 
-    //所有的gltf转换为一个b3dm后输出到output
+    //batch all gltfs into one b3dm
     return Promise.map(gltfs, function(gltfSetting) {
         return fsExtra.readJson(gltfSetting.url)
             .then(function (gltf) {
